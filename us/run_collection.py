@@ -1,5 +1,11 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
 import sys
 sys.path.append("..")
+
+reload(sys)                        
+sys.setdefaultencoding('utf-8')   
 
 from util import ts
 from collection import collection
