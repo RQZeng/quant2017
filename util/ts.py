@@ -12,6 +12,15 @@ def day_ts():
 	mkt=time.mktime((lt.tm_year,lt.tm_mon,lt.tm_mday,0,0,0,0,0,0))
 	return int(round(mkt))
 
+def is_today_ts(ts):
+	lt=time.localtime(ts)
+	mkt=time.mktime((lt.tm_year,lt.tm_mon,lt.tm_mday,0,0,0,0,0,0))
+	dts = int(round(mkt))
+	if dts == day_ts():
+		return True
+	return False
+	
+
 def month_ts():
 	lt=time.localtime()
 	mkt=time.mktime((lt.tm_year,lt.tm_mon,1,0,0,0,0,0,0))

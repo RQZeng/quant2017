@@ -6,4 +6,4 @@ import daily_collection_min
 
 def run(config):
 	daily_collection.run(config)
-	daily_collection_min.run(config)
+	#daily_collection_min.run(config)

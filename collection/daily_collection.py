@@ -12,6 +12,9 @@ import logging
 
 import sys
 sys.path.append("..")
+from pysql import db_init
+from pysql import t_stock_security
+from pysql import t_stock_history_day
 from util import ts
 from util import mail
 
@@ -72,113 +75,60 @@ def getBasic(security_id):
 
 def run(config):
 	logging.info("daily_collection start")
-
-	conn= MySQLdb.connect(
-			host	= config.DB_CONFIG['HOST'],
-			port 	= config.DB_CONFIG['PORT'],
-			user	= config.DB_CONFIG['USER'],
-			passwd	= config.DB_CONFIG['PASS'],
-			db 		= config.DB_CONFIG['DB'],
-			charset	= "utf8",
-			)
-	cur = conn.cursor()
-	cur.execute('select * from %s order by stock_id desc' %(config.TABLE_CONFIG['stock2securityId']))
-	results = cur.fetchall()
-
-	# get stock
-	stocks = []
-	for row in results:
-		stock = {'id':row[0],'se':row[1],'name':row[2],'sid':row[3]}
-		stocks.append(stock)
-
-	# stocks = []
-	# stocks.append({'id':'14144','se':'hk','name':'ac','sid':'73499775350592'})
-	# stocks.append({'id':'BLW','se':'nyse','name':'BLW信托','sid':'202931'})
-	# stocks.append({'id':'03062','se':'hk','name':'xdb','sid':'63101659515894'})
-	# stocks.append({'id':'03063','se':'hk','name':'xdb','sid':'63101659515895'})
-	# stocks.append({'id':'00890','se':'hk','name':'REP','sid':'37237366457210'})
-	stocks = []
-	stocks.append({'id':'AAPL','se':'nasqad','name':'AAPL','sid':'205189'})
+	conn	= db_init.GetDBConn(config)
+	stocks	= t_stock_security.QueryTable(conn)
 
 	stocks_num = 0
 	stocks_data_num = 0
-	source = 'futu'
 	for stock in stocks:
-		stocks_num += 1
-		# time.sleep(0.01)
-		response 	= ''
-		stock_name 	= stock['name']
-		stock_id	= stock['id']
-		se			= stock['se']
-		security_id = stock['sid']
-		
+		start_tick = time.clock()
+		insert_data_num = 0
+		#print(stock)
+		#if stock['stock_id']!=u'JD':
+		#	continue
 
-		if type(stock_name) == types.UnicodeType:
-			stock_name = stock_name.encode('utf-8')
-		if type(stock_id) == types.UnicodeType:
-			stock_id = stock_id.encode('utf-8')
-		if type(se) == types.UnicodeType:
-			se= se.encode('utf-8')
-		if type(security_id) == types.UnicodeType:
-			security_id= security_id.encode('utf-8')
-
-		stock_name	= MySQLdb.escape_string(stock_name)
-
-		ret,kline = getKLine(security_id)
-
+		stock_id 	= MySQLdb.escape_string(stock['stock_id'])
+		stock_name	= MySQLdb.escape_string(stock['stock_name'])
+		se			= MySQLdb.escape_string(stock['exchange'])
+		ext_info	= ''
+		ret,kline = getKLine(stock['security_id'])
 		if not ret:
-			logging.error("getKLine err for stock=%s" %(stock_name))
-			# log.write("getKLine err for stock=%s\n" %(stock_name))
+			logging.error("getKline err for stock=%s" %(stock_name))
 			continue
 
+		last_data = t_stock_history_day.GetLastInsertData(conn,stock_id)
+		max_day_ts = 0
+		if len(last_data) != 0:
+			max_day_ts=last_data[0]['day_ts']
 
-		stock_max_day_ts = 0
-		max_day_ts_query = "select max(stock_day_ts) from %s where stock_id='%s' and stock_exchange='%s'" % (config.TABLE_CONFIG['stockDayHistory'],stock_id,se)
-		cur.execute(max_day_ts_query)
-		results = cur.fetchall()
-		for row in results:
-			if row[0] != None:
-				stock_max_day_ts = row[0]
-
+		has_basic,basic = getBasic(stock['security_id'])
 
 		for i,v in enumerate(kline['data']['list']):
-			if v['k'] <= stock_max_day_ts :
+
+			if v['k'] <= max_day_ts :
 				continue
 
 			circulation,market_value,eps = 0,0,0
-			if v['k'] == ts.day_ts():
-				ret,basic = getBasic(security_id)
-				if not ret:
-					logging.error("getBasic err for stock=%s" %(stock_name))
-					# log.write("getBasic err for stock=%s\n" %(stock_name))
+			if ts.is_today_ts(v['k']) and has_basic:
+				market_value = (float)(basic['data']['quote']['mv'])
+				eps 	= (float)(basic['data']['quote']['eps'])
+				price 	= (float)(basic['data']['quote']['price'])
+				if price == 0:
+					logging.error("getBasic for stock=%s but price=0" %(stock_name))
 					continue
-				else:
-					market_value = (float)(basic['data']['quote']['mv'])
-					eps = (float)(basic['data']['quote']['eps'])
-					price = (float)(basic['data']['quote']['price'])
-					logging.info(market_value)
-					logging.info(eps)
-					logging.info(price)
-					if price == 0:
-						logging.error("getBasic for stock=%s but price=0" %(stock_name))
-						# log.write("getBasic for stock=%s but price=0\n" %(stock_name))
-						continue
-					circulation = (int)(market_value/price)
+				circulation = (int)(market_value/price)
 
 			stocks_data_num += 1
-			add_stock_history_query = "replace into %s(stock_name,stock_id,stock_exchange,stock_day_ts,open,close,high,low,volumn,turnover,circulation,market_value,eps,ext_info) \
-					values('%s','%s','%s',%d,%d,%d,%d,%d,%d,%d,%d,%.03f,%.03f,'%s')" \
-					% (config.TABLE_CONFIG['stockDayHistory'],stock_name,stock_id,se,v['k'],v['o'],v['c'],v['h'],v['l'],v['v'],v['t'],circulation,market_value,eps,source)
-			cur.execute(add_stock_history_query)
-		conn.commit()
-
-	logging.info("%s search stock_num=%d, insert data=%d" %(ts.htime(0),stocks_num,stocks_data_num))
-	logging.info("%s daily_collection end" %(ts.htime(0)))
-	# log.write("%s search stock_num=%d, insert data=%d\n" %(ts.htime(0),stocks_num,stocks_data_num))
-	# log.write("%s daily_collection end\n" %(ts.htime(0)))
-	# log.close()
-	cur.close()
+			insert_data_num += 1
+			t_stock_history_day.InsertData(conn,stock_name,stock_id,se,v['k'],
+											v['o'],v['c'],v['h'],v['l'],
+											v['v'],v['t'],circulation,market_value,eps,ext_info)
+			conn.commit()
+		end_tick = time.clock()
+		elapsed = end_tick - start_tick
+		logging.info("collect data for stock=%s cost time=%f,insert data num=%d" %(stock_name,elapsed,insert_data_num))
 	conn.close()
+	logging.info("daily_collection end")
 
 
 
